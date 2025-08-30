@@ -54,3 +54,21 @@ class ErrorResponse(BaseModel):
     file_path: Optional[str] = None
     platform: Optional[str] = None
     download_type: Optional[str] = None
+
+
+class TelegramDownloadResponse(BaseModel):
+    """Model for Telegram bot compatible download response."""
+    success: bool
+    message: str
+    file_url: Optional[str] = None
+    file_name: Optional[str] = None
+    file_size: Optional[int] = None  # Size in bytes for Telegram
+    duration: Optional[int] = None   # Duration in seconds for Telegram
+    width: Optional[int] = None      # Video width
+    height: Optional[int] = None     # Video height
+    thumbnail: Optional[str] = None  # Thumbnail URL
+    mime_type: Optional[str] = None  # MIME type for Telegram
+    platform: Optional[str] = None
+    download_type: Optional[str] = None
+    title: Optional[str] = None      # Video title
+    description: Optional[str] = None # Video description

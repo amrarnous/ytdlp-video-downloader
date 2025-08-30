@@ -4,7 +4,7 @@ services:
   video-downloader:
     build: .
     ports:
-      - "8000:8000"
+      - "56782:8000"
     volumes:
       - ./downloads:/app/downloads
       - ./logs:/app/logs

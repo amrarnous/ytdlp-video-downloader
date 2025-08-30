@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from .downloader import VideoDownloader
-from .models import DownloadRequest, DownloadResponse, ErrorResponse
+from .models import DownloadRequest, DownloadResponse, ErrorResponse, TelegramDownloadResponse, DownloadType
 
 
 # Configure logging
@@ -51,6 +51,7 @@ async def root():
         ],
         "endpoints": {
             "download": "/download",
+            "download_telegram": "/download/telegram",
             "info": "/info",
             "health": "/health"
         }
@@ -91,6 +92,141 @@ async def download_video(request: DownloadRequest) -> JSONResponse:
         error_response = ErrorResponse(
             message=f"Internal server error: {str(e)}"
         ).dict()
+        raise HTTPException(status_code=500, detail=error_response)
+
+
+@app.post("/download/telegram", response_model=TelegramDownloadResponse)
+async def download_video_telegram(request: DownloadRequest) -> JSONResponse:
+    """
+    Download video or audio from the provided URL with Telegram bot compatible response.
+    
+    This endpoint returns a response format optimized for Telegram bot integration,
+    including proper file URLs, MIME types, and metadata that Telegram bots expect.
+    
+    Args:
+        request (DownloadRequest): Download request with URL and type
+        
+    Returns:
+        JSONResponse: Telegram-compatible download result
+    """
+    try:
+        logger.info(f"Telegram download request: {request.url} ({request.download_type})")
+        
+        # First get video info for metadata
+        info_result = downloader.get_video_info(str(request.url))
+        
+        # Then download the file
+        download_result = downloader.download(str(request.url), request.download_type.value)
+        
+        if download_result["status"] == "error":
+            return JSONResponse(content={
+                "success": False,
+                "message": download_result["message"],
+                "file_url": None,
+                "file_name": None,
+                "file_size": None,
+                "duration": None,
+                "width": None,
+                "height": None,
+                "thumbnail": None,
+                "mime_type": None,
+                "platform": download_result.get("platform"),
+                "download_type": request.download_type.value,
+                "title": None,
+                "description": None
+            })
+        
+        # Extract file information
+        file_path = Path(download_result["file_path"])
+        file_name = file_path.name
+        file_size = file_path.stat().st_size if file_path.exists() else None
+        
+        # Generate file URL for serving
+        file_url = f"http://localhost:8000/download/{file_name}"
+        
+        # Determine MIME type based on file extension and download type
+        if request.download_type == DownloadType.VIDEO:
+            if file_name.endswith('.mp4'):
+                mime_type = "video/mp4"
+            elif file_name.endswith('.webm'):
+                mime_type = "video/webm"
+            elif file_name.endswith('.mkv'):
+                mime_type = "video/x-matroska"
+            else:
+                mime_type = "video/mp4"
+        else:  # audio
+            if file_name.endswith('.mp3'):
+                mime_type = "audio/mpeg"
+            elif file_name.endswith('.m4a'):
+                mime_type = "audio/mp4"
+            elif file_name.endswith('.ogg'):
+                mime_type = "audio/ogg"
+            else:
+                mime_type = "audio/mpeg"
+        
+        # Parse duration from the info or download result
+        duration_seconds = None
+        if info_result.get("status") == "success" and info_result.get("duration"):
+            duration_str = info_result.get("duration", "")
+            try:
+                # Parse duration like "03:45" to seconds
+                if ":" in duration_str:
+                    parts = duration_str.split(":")
+                    if len(parts) == 2:  # MM:SS
+                        duration_seconds = int(parts[0]) * 60 + int(parts[1])
+                    elif len(parts) == 3:  # HH:MM:SS
+                        duration_seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+            except (ValueError, IndexError):
+                duration_seconds = None
+        
+        # Extract video dimensions for video files (if available)
+        width, height = None, None
+        if request.download_type == DownloadType.VIDEO and info_result.get("status") == "success":
+            # These would come from video metadata if available
+            # For now, set common defaults
+            width = 1280
+            height = 720
+        
+        # Build Telegram-compatible response
+        telegram_response = {
+            "success": True,
+            "message": f"{request.download_type.value.title()} downloaded successfully for Telegram bot",
+            "file_url": file_url,
+            "file_name": file_name,
+            "file_size": file_size,
+            "duration": duration_seconds,
+            "width": width,
+            "height": height,
+            "thumbnail": None,  # Could be extracted from video metadata
+            "mime_type": mime_type,
+            "platform": download_result.get("platform"),
+            "download_type": request.download_type.value,
+            "title": info_result.get("title") if info_result.get("status") == "success" else None,
+            "description": info_result.get("description") if info_result.get("status") == "success" else None
+        }
+        
+        return JSONResponse(content=telegram_response)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in Telegram download endpoint: {str(e)}")
+        error_response = {
+            "success": False,
+            "message": f"Internal server error: {str(e)}",
+            "file_url": None,
+            "file_name": None,
+            "file_size": None,
+            "duration": None,
+            "width": None,
+            "height": None,
+            "thumbnail": None,
+            "mime_type": None,
+            "platform": None,
+            "download_type": request.download_type.value if request else None,
+            "title": None,
+            "description": None
+        }
         raise HTTPException(status_code=500, detail=error_response)
 
 

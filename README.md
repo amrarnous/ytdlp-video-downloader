@@ -104,6 +104,16 @@ curl -X POST "http://localhost:8000/download" \
      }'
 ```
 
+**Download for Telegram Bot (Optimized Response):**
+```bash
+curl -X POST "http://localhost:8000/download/telegram" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "url": "https://www.youtube.com/watch?v=example",
+       "download_type": "video"
+     }'
+```
+
 **Get Video Information:**
 ```bash
 curl -X POST "http://localhost:8000/info" \
@@ -145,6 +155,40 @@ All API responses follow this structure:
   "download_type": "audio"
 }
 ```
+
+### Telegram Bot Response Format
+
+The `/download/telegram` endpoint returns a response optimized for Telegram bot integration:
+
+```json
+{
+  "success": true,
+  "message": "Video downloaded successfully for Telegram bot",
+  "file_url": "http://localhost:8000/download/video.mp4",
+  "file_name": "video.mp4",
+  "file_size": 26542080,
+  "duration": 225,
+  "width": 1280,
+  "height": 720,
+  "thumbnail": null,
+  "mime_type": "video/mp4",
+  "platform": "YouTube",
+  "download_type": "video",
+  "title": "Sample Video Title",
+  "description": "Video description..."
+}
+```
+
+**Telegram Bot Integration Fields:**
+- `success`: Boolean indicating if download was successful
+- `file_url`: Direct URL to download the file
+- `file_name`: Original filename for Telegram
+- `file_size`: File size in bytes (required by Telegram)
+- `duration`: Duration in seconds for audio/video
+- `width`/`height`: Video dimensions for Telegram video messages
+- `mime_type`: Proper MIME type for Telegram file handling
+- `title`: Video title for captions
+- `description`: Video description for captions
 
 ## Supported Platforms
 
