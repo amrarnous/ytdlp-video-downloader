@@ -210,6 +210,111 @@ class VideoDownloader:
         
         return f"{size_bytes:.1f} TB"
     
+    def _get_estimated_file_sizes(self, info: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get estimated file sizes for different quality options.
+        
+        Args:
+            info (Dict[str, Any]): Video information from yt-dlp
+            
+        Returns:
+            Dict[str, Any]: File size information for different formats
+        """
+        formats = info.get('formats', [])
+        
+        # Find best video and audio formats with file sizes
+        best_video = None
+        best_audio = None
+        video_formats = []
+        audio_formats = []
+        
+        for fmt in formats:
+            filesize = fmt.get('filesize') or fmt.get('filesize_approx')
+            if not filesize:
+                continue
+                
+            format_info = {
+                'format_id': fmt.get('format_id'),
+                'ext': fmt.get('ext'),
+                'filesize': filesize,
+                'filesize_formatted': self._format_file_size(filesize),
+                'quality': fmt.get('format_note', ''),
+                'resolution': fmt.get('resolution', 'unknown')
+            }
+            
+            # Check if it's video or audio
+            if fmt.get('vcodec', 'none') != 'none':  # Has video
+                video_formats.append(format_info)
+                if not best_video or filesize > best_video.get('filesize', 0):
+                    if fmt.get('height', 0) >= 720:  # Prefer HD quality
+                        best_video = format_info
+            elif fmt.get('acodec', 'none') != 'none':  # Audio only
+                audio_formats.append(format_info)
+                if not best_audio or filesize > best_audio.get('filesize', 0):
+                    best_audio = format_info
+        
+        # Sort by filesize (largest first)
+        video_formats.sort(key=lambda x: x.get('filesize', 0), reverse=True)
+        audio_formats.sort(key=lambda x: x.get('filesize', 0), reverse=True)
+        
+        return {
+            'best_video': best_video,
+            'best_audio': best_audio,
+            'video_options': video_formats[:5],  # Top 5 video formats
+            'audio_options': audio_formats[:3],  # Top 3 audio formats
+            'estimated_total': self._format_file_size(
+                (best_video.get('filesize', 0) if best_video else 0) +
+                (best_audio.get('filesize', 0) if best_audio else 0)
+            ) if best_video or best_audio else None
+        }
+    
+    def _get_video_quality_info(self, info: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get video quality and technical information.
+        
+        Args:
+            info (Dict[str, Any]): Video information from yt-dlp
+            
+        Returns:
+            Dict[str, Any]: Video quality information
+        """
+        formats = info.get('formats', [])
+        
+        # Find the best quality video format
+        best_video = None
+        available_qualities = set()
+        
+        for fmt in formats:
+            if fmt.get('vcodec', 'none') != 'none':  # Has video
+                height = fmt.get('height')
+                width = fmt.get('width')
+                
+                if height:
+                    quality_label = f"{height}p"
+                    available_qualities.add(quality_label)
+                    
+                    if not best_video or (height > best_video.get('height', 0)):
+                        best_video = {
+                            'width': width,
+                            'height': height,
+                            'resolution': f"{width}x{height}" if width and height else f"{height}p",
+                            'fps': fmt.get('fps'),
+                            'vcodec': fmt.get('vcodec'),
+                            'acodec': fmt.get('acodec'),
+                            'ext': fmt.get('ext'),
+                            'format_note': fmt.get('format_note', ''),
+                            'quality_label': quality_label
+                        }
+        
+        return {
+            'best_quality': best_video,
+            'available_qualities': sorted(list(available_qualities), 
+                                        key=lambda x: int(x.replace('p', '')), reverse=True),
+            'has_video': best_video is not None,
+            'max_resolution': best_video.get('resolution') if best_video else None,
+            'max_fps': best_video.get('fps') if best_video else None
+        }
+    
     def download(self, url: str, download_type: str) -> Dict[str, Any]:
         """
         Download video or audio from the given URL.
@@ -349,16 +454,28 @@ class VideoDownloader:
                     platform=platform
                 ).dict()
             
+            # Get file size information from available formats
+            file_size_info = self._get_estimated_file_sizes(info)
+            
+            # Get video dimensions and quality info
+            video_quality = self._get_video_quality_info(info)
+            
             return {
                 "status": "success",
                 "message": "Video information extracted successfully.",
                 "platform": platform,
                 "title": info.get('title', 'Unknown'),
                 "duration": self._format_duration(info.get('duration')),
+                "duration_seconds": info.get('duration'),  # Raw duration in seconds
                 "view_count": info.get('view_count'),
                 "uploader": info.get('uploader', 'Unknown'),
                 "upload_date": info.get('upload_date'),
-                "description": info.get('description', '')[:200] + '...' if info.get('description') else None
+                "description": info.get('description', '')[:200] + '...' if info.get('description') else None,
+                "file_sizes": file_size_info,
+                "video_quality": video_quality,
+                "thumbnail": info.get('thumbnail'),
+                "webpage_url": info.get('webpage_url'),
+                "format_count": len(info.get('formats', []))
             }
             
         except Exception as e:
