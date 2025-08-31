@@ -20,15 +20,15 @@ services:
       start_period: 40s
 
   # Optional: Add a simple web UI (you can uncomment if needed)
-  # nginx:
-  #   image: nginx:alpine
-  #   ports:
-  #     - "80:80"
-  #   volumes:
-  #     - ./nginx.conf:/etc/nginx/nginx.conf
-  #   depends_on:
-  #     - video-downloader
-  #   restart: unless-stopped
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - video-downloader
+    restart: unless-stopped
 
 volumes:
   downloads:

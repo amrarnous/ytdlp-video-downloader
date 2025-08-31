@@ -60,7 +60,7 @@ class TelegramDownloadResponse(BaseModel):
     """Model for Telegram bot compatible download response."""
     success: bool
     message: str
-    file_url: Optional[str] = None
+    file_path: Optional[str] = None  # Local file path for bot processing
     file_name: Optional[str] = None
     file_size: Optional[int] = None  # Size in bytes for Telegram
     duration: Optional[int] = None   # Duration in seconds for Telegram

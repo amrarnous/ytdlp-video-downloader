@@ -8,7 +8,7 @@ import os
 import logging
 from pathlib import Path
 from typing import Dict, Any
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from .downloader import VideoDownloader
@@ -95,139 +95,89 @@ async def download_video(request: DownloadRequest) -> JSONResponse:
         raise HTTPException(status_code=500, detail=error_response)
 
 
-@app.post("/download/telegram", response_model=TelegramDownloadResponse)
-async def download_video_telegram(request: DownloadRequest) -> JSONResponse:
+@app.post("/download/telegram")
+async def download_video_telegram(request: DownloadRequest) -> FileResponse:
     """
-    Download video or audio from the provided URL with Telegram bot compatible response.
+    Download video or audio from the provided URL and return the binary file for Telegram bot.
     
-    This endpoint returns a response format optimized for Telegram bot integration,
-    including proper file URLs, MIME types, and metadata that Telegram bots expect.
+    This endpoint downloads the file and returns it directly as binary data,
+    perfect for Telegram bots that need to send the file to users.
     
     Args:
         request (DownloadRequest): Download request with URL and type
         
     Returns:
-        JSONResponse: Telegram-compatible download result
+        FileResponse: The downloaded file as binary data
     """
     try:
         logger.info(f"Telegram download request: {request.url} ({request.download_type})")
         
-        # First get video info for metadata
-        info_result = downloader.get_video_info(str(request.url))
-        
-        # Then download the file
+        # Download the file
         download_result = downloader.download(str(request.url), request.download_type.value)
         
         if download_result["status"] == "error":
-            return JSONResponse(content={
+            raise HTTPException(status_code=400, detail={
                 "success": False,
                 "message": download_result["message"],
-                "file_url": None,
-                "file_name": None,
-                "file_size": None,
-                "duration": None,
-                "width": None,
-                "height": None,
-                "thumbnail": None,
-                "mime_type": None,
                 "platform": download_result.get("platform"),
-                "download_type": request.download_type.value,
-                "title": None,
-                "description": None
+                "download_type": request.download_type.value
             })
         
-        # Extract file information
+        # Get the downloaded file path
         file_path = Path(download_result["file_path"])
-        file_name = file_path.name
-        file_size = file_path.stat().st_size if file_path.exists() else None
         
-        # Generate file URL for serving
-        file_url = f"http://localhost:8000/download/{file_name}"
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail={
+                "success": False,
+                "message": "Downloaded file not found",
+                "platform": download_result.get("platform"),
+                "download_type": request.download_type.value
+            })
         
         # Determine MIME type based on file extension and download type
         if request.download_type == DownloadType.VIDEO:
-            if file_name.endswith('.mp4'):
-                mime_type = "video/mp4"
-            elif file_name.endswith('.webm'):
-                mime_type = "video/webm"
-            elif file_name.endswith('.mkv'):
-                mime_type = "video/x-matroska"
+            if file_path.name.endswith('.mp4'):
+                media_type = "video/mp4"
+            elif file_path.name.endswith('.webm'):
+                media_type = "video/webm"
+            elif file_path.name.endswith('.mkv'):
+                media_type = "video/x-matroska"
             else:
-                mime_type = "video/mp4"
+                media_type = "video/mp4"
         else:  # audio
-            if file_name.endswith('.mp3'):
-                mime_type = "audio/mpeg"
-            elif file_name.endswith('.m4a'):
-                mime_type = "audio/mp4"
-            elif file_name.endswith('.ogg'):
-                mime_type = "audio/ogg"
+            if file_path.name.endswith('.mp3'):
+                media_type = "audio/mpeg"
+            elif file_path.name.endswith('.m4a'):
+                media_type = "audio/mp4"
+            elif file_path.name.endswith('.ogg'):
+                media_type = "audio/ogg"
             else:
-                mime_type = "audio/mpeg"
+                media_type = "audio/mpeg"
         
-        # Parse duration from the info or download result
-        duration_seconds = None
-        if info_result.get("status") == "success" and info_result.get("duration"):
-            duration_str = info_result.get("duration", "")
-            try:
-                # Parse duration like "03:45" to seconds
-                if ":" in duration_str:
-                    parts = duration_str.split(":")
-                    if len(parts) == 2:  # MM:SS
-                        duration_seconds = int(parts[0]) * 60 + int(parts[1])
-                    elif len(parts) == 3:  # HH:MM:SS
-                        duration_seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
-            except (ValueError, IndexError):
-                duration_seconds = None
-        
-        # Extract video dimensions for video files (if available)
-        width, height = None, None
-        if request.download_type == DownloadType.VIDEO and info_result.get("status") == "success":
-            # These would come from video metadata if available
-            # For now, set common defaults
-            width = 1280
-            height = 720
-        
-        # Build Telegram-compatible response
-        telegram_response = {
-            "success": True,
-            "message": f"{request.download_type.value.title()} downloaded successfully for Telegram bot",
-            "file_url": file_url,
-            "file_name": file_name,
-            "file_size": file_size,
-            "duration": duration_seconds,
-            "width": width,
-            "height": height,
-            "thumbnail": None,  # Could be extracted from video metadata
-            "mime_type": mime_type,
-            "platform": download_result.get("platform"),
-            "download_type": request.download_type.value,
-            "title": info_result.get("title") if info_result.get("status") == "success" else None,
-            "description": info_result.get("description") if info_result.get("status") == "success" else None
-        }
-        
-        return JSONResponse(content=telegram_response)
+        # Return the file as binary data
+        return FileResponse(
+            path=str(file_path),
+            filename=file_path.name,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f"attachment; filename={file_path.name}",
+                "X-Platform": download_result.get("platform", "unknown"),
+                "X-Download-Type": request.download_type.value,
+                "X-File-Size": str(file_path.stat().st_size),
+                "Cache-Control": "private, max-age=3600"
+            }
+        )
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Unexpected error in Telegram download endpoint: {str(e)}")
-        error_response = {
+        raise HTTPException(status_code=500, detail={
             "success": False,
             "message": f"Internal server error: {str(e)}",
-            "file_url": None,
-            "file_name": None,
-            "file_size": None,
-            "duration": None,
-            "width": None,
-            "height": None,
-            "thumbnail": None,
-            "mime_type": None,
             "platform": None,
-            "download_type": request.download_type.value if request else None,
-            "title": None,
-            "description": None
-        }
-        raise HTTPException(status_code=500, detail=error_response)
+            "download_type": request.download_type.value if request else None
+        })
 
 
 @app.post("/info")
@@ -266,76 +216,6 @@ async def get_video_info(request: Dict[str, str]) -> JSONResponse:
             message=f"Internal server error: {str(e)}"
         ).dict()
         raise HTTPException(status_code=500, detail=error_response)
-
-
-@app.get("/download/{filename}")
-async def download_file(filename: str):
-    """
-    Download a previously downloaded file.
-    
-    Args:
-        filename (str): Name of the file to download
-        
-    Returns:
-        FileResponse: The requested file
-    """
-    try:
-        file_path = downloader.download_dir / filename
-        
-        if not file_path.exists():
-            raise HTTPException(
-                status_code=404, 
-                detail={"message": f"File '{filename}' not found"}
-            )
-        
-        return FileResponse(
-            path=str(file_path),
-            filename=filename,
-            media_type='application/octet-stream'
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error serving file {filename}: {str(e)}")
-        raise HTTPException(
-            status_code=500, 
-            detail={"message": f"Error serving file: {str(e)}"}
-        )
-
-
-@app.get("/files")
-async def list_files():
-    """
-    List all downloaded files.
-    
-    Returns:
-        JSONResponse: List of available files
-    """
-    try:
-        files = []
-        for file_path in downloader.download_dir.iterdir():
-            if file_path.is_file():
-                stat = file_path.stat()
-                files.append({
-                    "filename": file_path.name,
-                    "size": stat.st_size,
-                    "created": stat.st_ctime,
-                    "download_url": f"/download/{file_path.name}"
-                })
-        
-        return JSONResponse(content={
-            "status": "success",
-            "files": files,
-            "count": len(files)
-        })
-        
-    except Exception as e:
-        logger.error(f"Error listing files: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail={"message": f"Error listing files: {str(e)}"}
-        )
 
 
 if __name__ == "__main__":
