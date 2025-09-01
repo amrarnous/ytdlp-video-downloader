@@ -7,10 +7,11 @@ A comprehensive Python application for downloading videos and audio from multipl
 - 🎥 **Multi-platform support**: YouTube, Facebook, Twitter/X, Instagram, TikTok, Vimeo, Twitch, Dailymotion
 - 🎵 **Audio/Video downloads**: Choose between video (MP4) or audio (MP3) formats
 - 🔧 **Multiple interfaces**: Command-line, Python API, and REST API
+- 🤖 **Telegram bot support**: Direct binary file endpoint for Telegram bot integration
 - 🐳 **Docker support**: Easy deployment with Docker and Docker Compose
 - 🛡️ **Error handling**: Comprehensive error handling and validation
 - 📋 **Format support**: Common formats with quality options
-- 🔍 **Video info**: Get video metadata without downloading
+- 🔍 **Video info**: Get detailed video metadata including file sizes and duration
 - 📚 **Well-documented**: Comprehensive documentation and examples
 
 ## Quick Start
@@ -90,6 +91,21 @@ print(result)
 # Get video info without downloading
 info = downloader.get_video_info("https://www.youtube.com/watch?v=example")
 print(info)
+# Output:
+# {
+#     "status": "success",
+#     "title": "Example Video",
+#     "duration": "03:45",
+#     "platform": "YouTube",
+#     "estimated_size": {
+#         "video": "45.2 MB",
+#         "audio": "8.1 MB"
+#     },
+#     "formats": {
+#         "video_formats": ["720p", "1080p"],
+#         "audio_formats": ["128kbps", "320kbps"]
+#     }
+# }
 ```
 
 ### REST API
@@ -104,17 +120,19 @@ curl -X POST "http://localhost:8000/download" \
      }'
 ```
 
-**Download for Telegram Bot (Optimized Response):**
+**Download for Telegram Bot (Returns Binary File):**
 ```bash
 curl -X POST "http://localhost:8000/download/telegram" \
      -H "Content-Type: application/json" \
      -d '{
        "url": "https://www.youtube.com/watch?v=example",
        "download_type": "video"
-     }'
+     }' \
+     --output downloaded_video.mp4
 ```
+*Note: This endpoint returns the actual file binary data, perfect for Telegram bots.*
 
-**Get Video Information:**
+**Get Video Information (with file size and duration):**
 ```bash
 curl -X POST "http://localhost:8000/info" \
      -H "Content-Type: application/json" \
@@ -123,15 +141,22 @@ curl -X POST "http://localhost:8000/info" \
 
 **List Downloaded Files:**
 ```bash
-curl "http://localhost:8000/files"
+curl "http://localhost:8000/"
 ```
 
 ## API Documentation
 
-### Response Format
+### Available Endpoints
 
-All API responses follow this structure:
+1. **POST /download** - Download and get file information
+2. **POST /download/telegram** - Download and return binary file (for bots)
+3. **POST /info** - Get video information without downloading
+4. **GET /health** - Health check endpoint
+5. **GET /** - API information and status
 
+### Response Formats
+
+**Standard Download Response (POST /download):**
 ```json
 {
   "status": "success" | "error",
@@ -141,6 +166,32 @@ All API responses follow this structure:
   "download_type": "video" | "audio",
   "file_size": "25.3 MB",
   "duration": "03:45"
+}
+```
+
+**Telegram Download Response (POST /download/telegram):**
+Returns the actual binary file data with appropriate headers for direct use by Telegram bots.
+
+**Video Info Response (POST /info):**
+```json
+{
+  "status": "success",
+  "title": "Video Title",
+  "description": "Video description...",
+  "duration": "03:45",
+  "platform": "YouTube",
+  "uploader": "Channel Name",
+  "view_count": 1000000,
+  "upload_date": "2024-01-15",
+  "formats": {
+    "video_formats": ["720p", "1080p"],
+    "audio_formats": ["128kbps", "320kbps"]
+  },
+  "estimated_size": {
+    "video": "45.2 MB",
+    "audio": "8.1 MB"
+  },
+  "thumbnail": "https://example.com/thumbnail.jpg"
 }
 ```
 
@@ -156,39 +207,18 @@ All API responses follow this structure:
 }
 ```
 
-### Telegram Bot Response Format
+**Telegram Bot Integration:**
+The `/download/telegram` endpoint returns the actual binary file data directly. This is perfect for Telegram bots as they can:
+- Receive the file binary data immediately
+- Send it directly to users without additional hosting
+- Get proper MIME types and file information via headers
+- Handle both video and audio files seamlessly
 
-The `/download/telegram` endpoint returns a response optimized for Telegram bot integration:
-
-```json
-{
-  "success": true,
-  "message": "Video downloaded successfully for Telegram bot",
-  "file_url": "http://localhost:8000/download/video.mp4",
-  "file_name": "video.mp4",
-  "file_size": 26542080,
-  "duration": 225,
-  "width": 1280,
-  "height": 720,
-  "thumbnail": null,
-  "mime_type": "video/mp4",
-  "platform": "YouTube",
-  "download_type": "video",
-  "title": "Sample Video Title",
-  "description": "Video description..."
-}
-```
-
-**Telegram Bot Integration Fields:**
-- `success`: Boolean indicating if download was successful
-- `file_url`: Direct URL to download the file
-- `file_name`: Original filename for Telegram
-- `file_size`: File size in bytes (required by Telegram)
-- `duration`: Duration in seconds for audio/video
-- `width`/`height`: Video dimensions for Telegram video messages
-- `mime_type`: Proper MIME type for Telegram file handling
-- `title`: Video title for captions
-- `description`: Video description for captions
+**Key Benefits for Telegram Bots:**
+- **Direct Binary Response**: No need for separate file hosting
+- **Proper Headers**: MIME type, filename, and size included
+- **Optimized**: Single request gets the file ready for sending
+- **Security**: No exposed file URLs or storage management needed
 
 ## Supported Platforms
 
