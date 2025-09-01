@@ -63,8 +63,8 @@ class VideoDownloader:
         
         if download_type == DownloadType.AUDIO:
             options.update({
-                # More flexible audio format selection with fallbacks
-                'format': 'bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best[height<=720]/best',
+                # Use a more robust audio format selection
+                'format': 'bestaudio/best',
                 'extractaudio': True,
                 'audioformat': 'mp3',
                 'audioquality': '192K',
@@ -73,7 +73,10 @@ class VideoDownloader:
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',
                     'preferredquality': '192',
-                }]
+                }],
+                # Ensure we keep trying different extractors
+                'ignoreerrors': False,
+                'no_warnings': False,
             })
         else:  # video
             options.update({
@@ -362,8 +365,19 @@ class VideoDownloader:
                 if d['status'] == 'finished':
                     downloaded_files.append(d['filename'])
                     logger.info(f"Downloaded: {d['filename']}")
+                elif d['status'] == 'processing':
+                    logger.info(f"Processing: {d.get('info_dict', {}).get('_filename', 'unknown')}")
+            
+            def postprocessor_hook(d):
+                if d['status'] == 'finished':
+                    # This gets called after post-processing (e.g., after audio extraction)
+                    processed_file = d.get('info_dict', {}).get('_filename')
+                    if processed_file and processed_file not in downloaded_files:
+                        downloaded_files.append(processed_file)
+                        logger.info(f"Post-processed: {processed_file}")
             
             options['progress_hooks'] = [hook]
+            options['postprocessor_hooks'] = [postprocessor_hook]
             
             try:
                 with yt_dlp.YoutubeDL(options) as ydl:
@@ -376,7 +390,15 @@ class VideoDownloader:
                 # Fallback options with more basic format selection
                 fallback_options = options.copy()
                 if dl_type == DownloadType.AUDIO:
-                    fallback_options['format'] = 'worst[acodec!=none]/worst'
+                    # For audio, try to get any audio stream available
+                    fallback_options.update({
+                        'format': 'worst[acodec!=none]/bestaudio/worst',
+                        'postprocessors': [{
+                            'key': 'FFmpegExtractAudio',
+                            'preferredcodec': 'mp3',
+                            'preferredquality': '128',  # Lower quality for fallback
+                        }]
+                    })
                 else:
                     fallback_options['format'] = 'worst[height>=360]/worst'
                 
@@ -392,6 +414,23 @@ class VideoDownloader:
             
             # Get the downloaded file path
             file_path = downloaded_files[0]
+            
+            # For audio downloads, check if the file was converted to mp3
+            if dl_type == DownloadType.AUDIO:
+                # Check if the original file was converted to mp3
+                base_name = os.path.splitext(file_path)[0]
+                mp3_file = f"{base_name}.mp3"
+                if os.path.exists(mp3_file) and file_path != mp3_file:
+                    file_path = mp3_file
+                    logger.info(f"Using converted audio file: {mp3_file}")
+            
+            # Ensure the file exists
+            if not os.path.exists(file_path):
+                return ErrorResponse(
+                    message=f"Downloaded file not found: {file_path}",
+                    platform=platform,
+                    download_type=download_type
+                ).dict()
             
             # Get file size
             file_size = None
